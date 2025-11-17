@@ -1,0 +1,58 @@
+{
+  "professional_score": 70.41,
+  "rating": "Kha",
+  "breakdown": {
+    "emotion": {
+      "score": 73.8320510505944,
+      "breakdown": {
+        "Angry": {
+          "percentage": 10.682453295431161,
+          "count": 10.682453295431161
+        },
+        "Happy": {
+          "percentage": 47.52635206444351,
+          "count": 47.52635206444351
+        },
+        "Sad": {
+          "percentage": 14.254513451898768,
+          "count": 14.254513451898768
+        },
+        "Neutral": {
+          "percentage": 27.536681188226574,
+          "count": 27.536681188226574
+        }
+      },
+      "dominant": "Happy"
+    },
+    "appearance": {
+      "score": 55.69670073072061,
+      "breakdown": {
+        "dress_code": 42.903925203719616,
+        "background": 60.36115349899985,
+        "lighting": 84.2679851422991
+      }
+    },
+    "behavior": {
+      "score": 79.45627705627706,
+      "breakdown": {
+        "eye_contact": 100.0,
+        "posture": 70.80086580086581,
+        "gestures": 60.0
+      }
+    },
+    "technical": {
+      "score": 80.0,
+      "breakdown": {
+        "video_quality": 80.0,
+        "audio_quality": 80.0,
+        "stability": 80.0
+      }
+    }
+  },
+  "weights": {
+    "emotion": 0.35,
+    "appearance": 0.3,
+    "behavior": 0.25,
+    "technical": 0.1
+  }
+}
