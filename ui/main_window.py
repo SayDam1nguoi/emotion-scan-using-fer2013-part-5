@@ -62,10 +62,9 @@ class MainWindow:
         header_frame = tk.Frame(main_frame, bg="#ffffff")
         header_frame.pack(fill=tk.X, pady=(20, 10))
 
-        tk.Label(header_frame, text="🎭", font=("Segoe UI Emoji", 60),
-                 bg="#ffffff", fg="#27ae60").pack(pady=(10, 5))
+        # XÓA EMOJI MẶT HỀ - chỉ giữ text
         tk.Label(header_frame, text="Emotion Scanner", font=("Segoe UI", 26, "bold"),
-                 bg="#ffffff", fg="#2c3e50").pack()
+                 bg="#ffffff", fg="#2c3e50").pack(pady=(10, 5))
         tk.Label(header_frame, text=f"👋  Xin chào, {username}!", font=("Segoe UI", 13),
                  bg="#ffffff", fg="#7f8c8d").pack(pady=(5, 10))
 
@@ -88,27 +87,13 @@ class MainWindow:
         # Divider
         tk.Frame(content_frame, bg="#e1e8ed", height=2).pack(fill=tk.X, pady=(0, 20))
 
-        file_card = tk.Frame(content_frame, bg="#f8f9fa",
-                             highlightbackground="#27ae60", highlightthickness=2)
-        file_card.pack(fill=tk.X, pady=(0, 15))
-
-        tk.Label(file_card, text="📁  File dữ liệu huấn luyện",
-                 font=("Segoe UI", 11, "bold"), bg="#f8f9fa", fg="#2c3e50").pack(
-                     anchor="w", padx=18, pady=(15, 8))
-
-        self.lbl_file = tk.Label(file_card, text="⚠️  Chưa chọn file dữ liệu",
-                                 font=("Segoe UI", 10), bg="#f8f9fa", fg="#e74c3c")
-        self.lbl_file.pack(anchor="w", padx=18, pady=(0, 15))
-
-        choose_btn = tk.Button(content_frame, text="📂  Chọn file FER2013 (.csv)",
-                               font=("Segoe UI", 11, "bold"), bg="#3498db", fg="white",
-                               relief=tk.FLAT, cursor="hand2", borderwidth=0,
-                               activebackground="#2980b9", activeforeground="white",
-                               command=self.choose_file)
-        choose_btn.pack(fill=tk.X, pady=(0, 20), ipady=14)
-
-        choose_btn.bind("<Enter>", lambda e: choose_btn.configure(bg="#2980b9"))
-        choose_btn.bind("<Leave>", lambda e: choose_btn.configure(bg="#3498db"))
+        # File card - ẩn đi, chỉ hiển thị status nhẹ
+        file_status_frame = tk.Frame(content_frame, bg="#ffffff")
+        file_status_frame.pack(fill=tk.X, pady=(0, 10))
+        
+        self.lbl_file = tk.Label(file_status_frame, text="",
+                                 font=("Segoe UI", 9), bg="#ffffff", fg="#7f8c8d")
+        self.lbl_file.pack(anchor="center")
 
         video_card = tk.Frame(content_frame, bg="#f8f9fa",
                               highlightbackground="#9b59b6", highlightthickness=2)
@@ -193,7 +178,7 @@ class MainWindow:
                               highlightbackground="#8e44ad", highlightthickness=3)
         screen_card.pack(fill=tk.X, pady=(0, 15))
         
-        detect_screen_btn = tk.Button(screen_card, text="💻  Quét từ Màn hình (App bất kỳ)",
+        detect_screen_btn = tk.Button(screen_card, text="💻  Quét Toàn Màn hình (Tự động)",
                                       font=("Segoe UI", 12, "bold"), bg="#8e44ad", fg="white",
                                       relief=tk.FLAT, cursor="hand2", borderwidth=0,
                                       activebackground="#6c3483", activeforeground="white",
@@ -202,7 +187,7 @@ class MainWindow:
         detect_screen_btn.bind("<Enter>", lambda e: detect_screen_btn.configure(bg="#6c3483"))
         detect_screen_btn.bind("<Leave>", lambda e: detect_screen_btn.configure(bg="#8e44ad"))
         
-        tk.Label(content_frame, text="💡 YouTube, Netflix, Zoom, phim, app bất kỳ",
+        tk.Label(content_frame, text="💡 Quét toàn màn hình - Zoom, Teams, YouTube, phim",
                 font=("Segoe UI", 8), bg="#ffffff", fg="#7f8c8d").pack(pady=(0, 15))
         
         # 4. Dual Detection Card
@@ -210,7 +195,7 @@ class MainWindow:
                             highlightbackground="#e74c3c", highlightthickness=3)
         dual_card.pack(fill=tk.X, pady=(0, 30))
         
-        detect_dual_btn = tk.Button(dual_card, text="👥  Quét CẢ 2 NGƯỜI (Camera + Màn hình)",
+        detect_dual_btn = tk.Button(dual_card, text="👥  Quét CẢ 2 NGƯỜI (Tự động)",
                                     font=("Segoe UI", 12, "bold"), bg="#e74c3c", fg="white",
                                     relief=tk.FLAT, cursor="hand2", borderwidth=0,
                                     activebackground="#c0392b", activeforeground="white",
@@ -218,6 +203,9 @@ class MainWindow:
         detect_dual_btn.pack(fill=tk.X, padx=3, pady=3, ipady=14)
         detect_dual_btn.bind("<Enter>", lambda e: detect_dual_btn.configure(bg="#c0392b"))
         detect_dual_btn.bind("<Leave>", lambda e: detect_dual_btn.configure(bg="#e74c3c"))
+        
+        tk.Label(content_frame, text="💡 Camera + Toàn màn hình - Tự động tìm 2 khuôn mặt",
+                font=("Segoe UI", 8), bg="#ffffff", fg="#7f8c8d").pack(pady=(0, 15))
         
         # Bottom divider
         tk.Frame(content_frame, bg="#e1e8ed", height=2).pack(fill=tk.X, pady=(5, 15))
@@ -241,8 +229,24 @@ class MainWindow:
         self.csv_path = ""
         self.video_path = ""
         self.camera_id = 0  # Default camera
+        
+        # Tự động tìm dataset
+        self._auto_find_dataset()
 
         self.root.protocol("WM_DELETE_WINDOW", self.logout)
+        
+        # THÊM NÚT THOÁT Ở GÓC TRÊN PHẢI
+        exit_btn = tk.Button(main_frame, text="✕ Thoát", 
+                            font=("Segoe UI", 10, "bold"), 
+                            bg="#e74c3c", fg="white",
+                            relief=tk.FLAT, cursor="hand2", 
+                            borderwidth=0, padx=15, pady=8,
+                            command=self.exit_app)
+        exit_btn.place(relx=0.98, rely=0.02, anchor="ne")
+        
+        # Hover effects
+        exit_btn.bind("<Enter>", lambda e: exit_btn.configure(bg="#c0392b"))
+        exit_btn.bind("<Leave>", lambda e: exit_btn.configure(bg="#e74c3c"))
 
         # Center window on screen
         self.root.update_idletasks()
@@ -250,15 +254,121 @@ class MainWindow:
         y = (screen_height - window_height) // 2
         self.root.geometry(f"{window_width}x{window_height}+{x}+{y}")
 
+    def _auto_find_dataset(self):
+        """Tự động tìm file dataset"""
+        # Tìm dataset trong các vị trí phổ biến (inline để tránh circular import)
+        dataset_names = ['fer2013.csv', 'FER2013.csv', 'ckextended.csv', 'CKExtended.csv']
+        search_paths = [
+            '.',
+            './data',
+            './datasets',
+            '../',
+            '../data',
+            '../datasets',
+            os.path.expanduser('~/Downloads'),
+            os.path.expanduser('~/Desktop'),
+        ]
+        
+        dataset_path = None
+        for search_path in search_paths:
+            if not os.path.exists(search_path):
+                continue
+            for dataset_name in dataset_names:
+                full_path = os.path.join(search_path, dataset_name)
+                if os.path.exists(full_path) and os.path.isfile(full_path):
+                    dataset_path = os.path.abspath(full_path)
+                    break
+            if dataset_path:
+                break
+        
+        if dataset_path:
+            # Validate dataset
+            try:
+                with open(dataset_path, 'r') as f:
+                    header = f.readline().strip()
+                    if 'emotion' not in header.lower() or 'pixels' not in header.lower():
+                        self.lbl_file.config(
+                            text=f"⚠️  Tìm thấy {os.path.basename(dataset_path)} nhưng không hợp lệ",
+                            fg="#e67e22"
+                        )
+                        return
+                    
+                    data_line = f.readline().strip()
+                    if not data_line:
+                        self.lbl_file.config(
+                            text=f"⚠️  File {os.path.basename(dataset_path)} rỗng",
+                            fg="#e67e22"
+                        )
+                        return
+                
+                # Dataset hợp lệ
+                self.csv_path = dataset_path
+                filename = os.path.basename(dataset_path)
+                
+                # Xác định loại dataset
+                if 'fer2013' in filename.lower():
+                    dataset_type = 'FER2013'
+                elif 'ck' in filename.lower():
+                    dataset_type = 'CK+ Extended'
+                else:
+                    dataset_type = 'Unknown'
+                
+                # Cập nhật UI - hiển thị nhẹ
+                self.lbl_file.config(
+                    text=f"✅ File dữ liệu huấn luyện hợp lệ ({dataset_type})",
+                    fg="#27ae60"
+                )
+            except Exception as e:
+                self.lbl_file.config(
+                    text=f"⚠️ Lỗi đọc file dữ liệu",
+                    fg="#e67e22"
+                )
+        else:
+            # Không tìm thấy dataset
+            self.lbl_file.config(
+                text="⚠️ Không tìm thấy file dữ liệu huấn luyện",
+                fg="#e74c3c"
+            )
+    
     def choose_file(self):
-        path = filedialog.askopenfilename(title="Chọn file FER2013 (fer2013.csv)",
+        """Hidden feature - có thể gọi từ code nhưng không hiển thị button"""
+        path = filedialog.askopenfilename(title="Chọn file dữ liệu huấn luyện",
                                           filetypes=[("CSV files", "*.csv")])
         if path:
-            self.csv_path = path
-            filename = os.path.basename(path)
-            self.lbl_file.config(text=f"✅  {filename}", fg="#27ae60")
-        else:
-            self.lbl_file.config(text="⚠️  Chưa chọn file dữ liệu", fg="#e74c3c")
+            # Validate dataset (inline để tránh circular import)
+            try:
+                with open(path, 'r') as f:
+                    header = f.readline().strip()
+                    if 'emotion' not in header.lower() or 'pixels' not in header.lower():
+                        messagebox.showerror("Lỗi", "File CSV không đúng format (thiếu cột emotion hoặc pixels)")
+                        self.lbl_file.config(text="⚠️ File không hợp lệ", fg="#e74c3c")
+                        return
+                    
+                    data_line = f.readline().strip()
+                    if not data_line:
+                        messagebox.showerror("Lỗi", "File CSV rỗng")
+                        self.lbl_file.config(text="⚠️ File không hợp lệ", fg="#e74c3c")
+                        return
+                
+                # Dataset hợp lệ
+                self.csv_path = path
+                filename = os.path.basename(path)
+                
+                # Xác định loại dataset
+                if 'fer2013' in filename.lower():
+                    dataset_type = 'FER2013'
+                elif 'ck' in filename.lower():
+                    dataset_type = 'CK+ Extended'
+                else:
+                    dataset_type = 'Unknown'
+                
+                self.lbl_file.config(
+                    text=f"✅ File dữ liệu huấn luyện hợp lệ ({dataset_type})",
+                    fg="#27ae60"
+                )
+            except Exception as e:
+                messagebox.showerror("Lỗi", f"Lỗi đọc file:\n{str(e)}")
+                self.lbl_file.config(text="⚠️ File không hợp lệ", fg="#e74c3c")
 
     def choose_video(self):
         path = filedialog.askopenfilename(title="Chọn video",
@@ -285,7 +395,12 @@ class MainWindow:
     def detect_emotion_camera(self):
         """Quét toàn bộ camera (không ROI)"""
         if not self.csv_path:
-            messagebox.showerror("Lỗi", "Vui lòng chọn file FER2013 (.csv) trước!")
+            msg = ("Không tìm thấy file dữ liệu huấn luyện!\n\n"
+                   "Vui lòng đặt file fer2013.csv vào thư mục gốc của ứng dụng.\n\n"
+                   "File fer2013.csv có thể tải từ:\n"
+                   "https://www.kaggle.com/datasets/msambare/fer2013\n\n"
+                   "Sau khi tải xong, khởi động lại ứng dụng.")
+            messagebox.showerror("Thiếu file dữ liệu", msg)
             return
         
         # Import and start detection (loading window will show inside start_detection)
@@ -299,7 +414,10 @@ class MainWindow:
     def detect_emotion_camera_roi(self):
         """Quét vùng cụ thể trong camera (với ROI)"""
         if not self.csv_path:
-            messagebox.showerror("Lỗi", "Vui lòng chọn file FER2013 (.csv) trước!")
+            msg = ("Không tìm thấy file dữ liệu huấn luyện!\n\n"
+                   "Vui lòng đặt file fer2013.csv vào thư mục gốc của ứng dụng.\n\n"
+                   "Sau khi tải xong, khởi động lại ứng dụng.")
+            messagebox.showerror("Thiếu file dữ liệu", msg)
             return
         
         # Show instructions
@@ -353,63 +471,206 @@ class MainWindow:
             messagebox.showerror("Lỗi", f"Không thể khởi động camera ROI:\n{str(e)}")
 
     def detect_emotion_video(self):
+        """Quét video với lựa chọn mode: Nhà tuyển dụng hoặc Ứng viên"""
         if not self.csv_path:
-            messagebox.showerror("Lỗi", "Vui lòng chọn file FER2013 (.csv)!")
+            msg = ("Không tìm thấy file dữ liệu huấn luyện!\n\n"
+                   "Vui lòng đặt file fer2013.csv vào thư mục gốc của ứng dụng.\n\n"
+                   "Sau khi tải xong, khởi động lại ứng dụng.")
+            messagebox.showerror("Thiếu file dữ liệu", msg)
             return
         if not self.video_path:
             messagebox.showerror("Lỗi", "Vui lòng chọn video!")
             return
         
-        # Import and start detection (loading window will show inside start_detection)
+        # Show mode selection dialog
+        mode = self._show_video_mode_selection()
+        if mode is None:
+            return  # User cancelled
+        
+        # Import and start detection with mode
         from core.detector import start_detection
         
         try:
-            start_detection(self.csv_path, video_path=self.video_path)
+            start_detection(self.csv_path, video_path=self.video_path, analysis_mode=mode)
         except Exception as e:
             messagebox.showerror("Lỗi", f"Không thể tải video:\n{str(e)}")
     
+    def _show_video_mode_selection(self):
+        """Hiển thị dialog chọn mode phân tích video"""
+        import tkinter as tk
+        
+        result = {'mode': None}
+        
+        # Create dialog - Tăng chiều cao
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Chọn chế độ phân tích")
+        dialog.geometry("600x650")  # Tăng từ 500 lên 650
+        dialog.resizable(True, True)  # Cho phép resize
+        dialog.configure(bg="#ffffff")
+        
+        # Center dialog
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - 300
+        y = (dialog.winfo_screenheight() // 2) - 325  # Điều chỉnh y
+        dialog.geometry(f"600x650+{x}+{y}")
+        
+        # Make modal
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        # Header
+        header_frame = tk.Frame(dialog, bg="#ffffff")
+        header_frame.pack(fill=tk.X, pady=(15, 10))
+        
+        tk.Label(header_frame, text="🎯", font=("Segoe UI Emoji", 35),
+                bg="#ffffff").pack()
+        tk.Label(header_frame, text="Chọn chế độ phân tích video",
+                font=("Segoe UI", 15, "bold"), bg="#ffffff", fg="#2c3e50").pack(pady=(8, 3))
+        tk.Label(header_frame, text="Bạn là nhà tuyển dụng hay ứng viên?",
+                font=("Segoe UI", 9), bg="#ffffff", fg="#7f8c8d").pack()
+        
+        # Scrollable content frame
+        canvas = tk.Canvas(dialog, bg="#ffffff", highlightthickness=0)
+        scrollbar = tk.Scrollbar(dialog, orient="vertical", command=canvas.yview)
+        content_frame = tk.Frame(canvas, bg="#ffffff")
+        
+        content_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=content_frame, anchor="nw", width=560)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.pack(side="left", fill="both", expand=True, padx=(20, 0), pady=(0, 10))
+        scrollbar.pack(side="right", fill="y", pady=(0, 10))
+        
+        # Enable mouse wheel scrolling
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        
+        def select_mode(mode_value):
+            canvas.unbind_all("<MouseWheel>")
+            result['mode'] = mode_value
+            dialog.destroy()
+        
+        # Mode 1: Recruiter
+        recruiter_card = tk.Frame(content_frame, bg="#f8f9fa",
+                                 highlightbackground="#3498db", highlightthickness=2)
+        recruiter_card.pack(fill=tk.X, pady=(0, 15))
+        
+        tk.Label(recruiter_card, text="👔 NHÀ TUYỂN DỤNG",
+                font=("Segoe UI", 12, "bold"), bg="#f8f9fa", fg="#2c3e50").pack(
+                    anchor="w", padx=20, pady=(15, 5))
+        
+        tk.Label(recruiter_card, 
+                text="Đánh giá video CV của ứng viên\n\n"
+                     "✅ Phân tích cảm xúc chuyên nghiệp\n"
+                     "✅ Đánh giá trang phục, background\n"
+                     "✅ Kiểm tra sự tự tin, tập trung\n"
+                     "✅ So sánh giữa các ứng viên",
+                font=("Segoe UI", 9), bg="#f8f9fa", fg="#34495e",
+                justify=tk.LEFT).pack(anchor="w", padx=20, pady=(0, 10))
+        
+        recruiter_btn = tk.Button(recruiter_card, text="Chọn chế độ này",
+                                 font=("Segoe UI", 10, "bold"), bg="#3498db", fg="white",
+                                 relief=tk.FLAT, cursor="hand2",
+                                 command=lambda: select_mode('recruiter'))
+        recruiter_btn.pack(fill=tk.X, padx=20, pady=(0, 15), ipady=10)
+        
+        # Mode 2: Recruiter Self-Check
+        recruiter_self_card = tk.Frame(content_frame, bg="#f8f9fa",
+                                      highlightbackground="#e67e22", highlightthickness=2)
+        recruiter_self_card.pack(fill=tk.X, pady=(0, 15))
+        
+        tk.Label(recruiter_self_card, text="🎬 NHÀ TUYỂN DỤNG (Tự kiểm tra)",
+                font=("Segoe UI", 12, "bold"), bg="#f8f9fa", fg="#2c3e50").pack(
+                    anchor="w", padx=20, pady=(15, 5))
+        
+        tk.Label(recruiter_self_card,
+                text="Kiểm tra video tuyển dụng của bạn\n\n"
+                     "✅ Video có đủ hấp dẫn không?\n"
+                     "✅ Cảm xúc có nhiệt tình, chuyên nghiệp?\n"
+                     "✅ Có thu hút được ứng viên không?\n"
+                     "✅ Gợi ý cải thiện để tăng hiệu quả",
+                font=("Segoe UI", 9), bg="#f8f9fa", fg="#34495e",
+                justify=tk.LEFT).pack(anchor="w", padx=20, pady=(0, 10))
+        
+        recruiter_self_btn = tk.Button(recruiter_self_card, text="Chọn chế độ này",
+                                       font=("Segoe UI", 10, "bold"), bg="#e67e22", fg="white",
+                                       relief=tk.FLAT, cursor="hand2",
+                                       command=lambda: select_mode('recruiter_self'))
+        recruiter_self_btn.pack(fill=tk.X, padx=20, pady=(0, 15), ipady=10)
+        
+        # Mode 3: Candidate
+        candidate_card = tk.Frame(content_frame, bg="#f8f9fa",
+                                 highlightbackground="#27ae60", highlightthickness=2)
+        candidate_card.pack(fill=tk.X, pady=(0, 15))
+        
+        tk.Label(candidate_card, text="🎓 ỨNG VIÊN",
+                font=("Segoe UI", 12, "bold"), bg="#f8f9fa", fg="#2c3e50").pack(
+                    anchor="w", padx=20, pady=(15, 5))
+        
+        tk.Label(candidate_card,
+                text="Tự kiểm tra video CV của bạn\n\n"
+                     "✅ Kiểm tra cảm xúc có phù hợp không\n"
+                     "✅ Gợi ý cải thiện trang phục, ánh sáng\n"
+                     "✅ Đánh giá độ tự tin, chuyên nghiệp\n"
+                     "✅ Lời khuyên để cải thiện video",
+                font=("Segoe UI", 9), bg="#f8f9fa", fg="#34495e",
+                justify=tk.LEFT).pack(anchor="w", padx=20, pady=(0, 10))
+        
+        candidate_btn = tk.Button(candidate_card, text="Chọn chế độ này",
+                                 font=("Segoe UI", 10, "bold"), bg="#27ae60", fg="white",
+                                 relief=tk.FLAT, cursor="hand2",
+                                 command=lambda: select_mode('candidate'))
+        candidate_btn.pack(fill=tk.X, padx=20, pady=(0, 15), ipady=10)
+        
+        # Cancel button
+        cancel_btn = tk.Button(content_frame, text="Hủy",
+                              font=("Segoe UI", 10), bg="#ffffff", fg="#e74c3c",
+                              relief=tk.FLAT, cursor="hand2",
+                              command=dialog.destroy)
+        cancel_btn.pack(pady=(10, 0), ipady=8)
+        
+        # Wait for dialog to close
+        dialog.wait_window()
+        
+        return result['mode']
+    
     def detect_emotion_screen(self):
-        """Quét cảm xúc từ screen capture (video call)"""
+        """Quét cảm xúc từ screen capture (video call) - TOÀN MÀN HÌNH"""
         if not self.csv_path:
-            messagebox.showerror("Lỗi", "Vui lòng chọn file FER2013 (.csv) trước!")
+            msg = ("Không tìm thấy file dữ liệu huấn luyện!\n\n"
+                   "Vui lòng đặt file fer2013.csv vào thư mục gốc của ứng dụng.\n\n"
+                   "Sau khi tải xong, khởi động lại ứng dụng.")
+            messagebox.showerror("Thiếu file dữ liệu", msg)
             return
         
-        # Show instructions
-        msg = ("QUÉT TỪ MÀN HÌNH:\n\n"
-               "Quét khuôn mặt từ BẤT KỲ ứng dụng nào:\n"
-               "• Video call (Zoom, Teams, Meet)\n"
-               "• Video YouTube, Netflix, phim\n"
-               "• Ứng dụng khác có khuôn mặt\n\n"
-               "HƯỚNG DẪN:\n"
-               "1. Mở ứng dụng cần quét\n"
-               "2. Nhấn OK để chọn vùng màn hình\n"
-               "3. Kéo chuột chọn vùng có khuôn mặt\n"
-               "4. Nhấn ENTER xác nhận\n\n"
-               "Bạn có muốn tiếp tục?")
-        
-        result = messagebox.askokcancel("Quét từ Màn hình", msg)
-        if not result:
-            return
+        # Show mode selection dialog
+        mode = self._show_screen_mode_selection()
+        if mode is None:
+            return  # User cancelled
         
         try:
             # Import screen capture
-            from core.screen_capture import select_capture_region_interactive
             from core.detector import start_detection_screen
+            import mss
             
-            # Let user select region
-            messagebox.showinfo("Chọn vùng màn hình", 
-                              "Kéo chuột để chọn vùng có khuôn mặt\n"
-                              "Có thể là: Video call, YouTube, phim, app bất kỳ\n"
-                              "ENTER: Xác nhận | ESC: Hủy")
+            # Get full screen dimensions automatically
+            with mss.mss() as sct:
+                monitor = sct.monitors[1]  # Primary monitor
+                region = (0, 0, monitor['width'], monitor['height'])
             
-            region = select_capture_region_interactive()
+            messagebox.showinfo("Bắt đầu", 
+                              "Bắt đầu quét TOÀN MÀN HÌNH!\n\n"
+                              "- Nhấn 'q' để dừng\n"
+                              "- Nhấn 's' để chụp ảnh\n"
+                              "- Hệ thống sẽ tự động tìm khuôn mặt")
             
-            if region is None:
-                messagebox.showinfo("Đã hủy", "Đã hủy chọn vùng")
-                return
-            
-            # Start detection with screen capture
-            start_detection_screen(self.csv_path, region)
+            # Start detection with full screen and mode
+            start_detection_screen(self.csv_path, region, analysis_mode=mode)
             
         except ImportError:
             messagebox.showerror("Lỗi", 
@@ -420,24 +681,28 @@ class MainWindow:
             messagebox.showerror("Lỗi", f"Không thể capture màn hình:\n{str(e)}")
     
     def detect_emotion_dual(self):
-        """Quét cảm xúc CẢ 2 NGƯỜI - Camera + Screen"""
+        """Quét cảm xúc CẢ 2 NGƯỜI - Camera + Screen (TOÀN MÀN HÌNH)"""
         if not self.csv_path:
-            messagebox.showerror("Lỗi", "Vui lòng chọn file FER2013 (.csv) trước!")
+            msg = ("Không tìm thấy file dữ liệu huấn luyện!\n\n"
+                   "Vui lòng đặt file fer2013.csv vào thư mục gốc của ứng dụng.\n\n"
+                   "Sau khi tải xong, khởi động lại ứng dụng.")
+            messagebox.showerror("Thiếu file dữ liệu", msg)
             return
         
         # Show instructions
         msg = ("QUÉT CẢ 2 NGƯỜI TRONG VIDEO CALL:\n\n"
                "📹 Camera: Quét CHÍNH BẠN\n"
-               "💻 Screen: Quét NGƯỜI ĐỐI DIỆN\n\n"
+               "💻 Screen: Quét TOÀN MÀN HÌNH (tìm người đối diện)\n\n"
                "HƯỚNG DẪN:\n"
                "1. Mở ứng dụng video call\n"
                "2. Bắt đầu cuộc gọi\n"
-               "3. Chọn vùng màn hình chứa khuôn mặt người đối diện\n"
+               "3. Nhấn OK để bắt đầu\n"
                "4. Hệ thống sẽ quét CẢ 2 NGƯỜI đồng thời\n\n"
                "KẾT QUẢ:\n"
                "- So sánh cảm xúc 2 bên\n"
                "- Ai tích cực hơn?\n"
                "- Ai tập trung hơn?\n\n"
+               "💡 Lưu ý: Quét toàn màn hình, tự động tìm khuôn mặt\n\n"
                "Bạn có muốn tiếp tục?")
         
         result = messagebox.askokcancel("Quét Cả 2 Người", msg)
@@ -446,21 +711,22 @@ class MainWindow:
         
         try:
             # Import modules
-            from core.screen_capture import select_capture_region_interactive
             from core.detector import start_detection_dual
+            import mss
             
-            # Let user select region for person 2 (screen)
-            messagebox.showinfo("Chọn vùng người đối diện", 
-                              "Kéo chuột để chọn vùng khuôn mặt NGƯỜI ĐỐI DIỆN\n"
-                              "Nhấn ENTER để xác nhận, ESC để hủy")
+            # Get full screen dimensions automatically
+            with mss.mss() as sct:
+                monitor = sct.monitors[1]  # Primary monitor
+                region = (0, 0, monitor['width'], monitor['height'])
             
-            region = select_capture_region_interactive()
+            messagebox.showinfo("Bắt đầu", 
+                              "Bắt đầu quét CẢ 2 NGƯỜI!\n\n"
+                              "📹 Camera: Quét bạn\n"
+                              "💻 Screen: Quét toàn màn hình\n\n"
+                              "- Nhấn 'q' để dừng\n"
+                              "- Hệ thống tự động tìm khuôn mặt")
             
-            if region is None:
-                messagebox.showinfo("Đã hủy", "Đã hủy chọn vùng")
-                return
-            
-            # Start dual detection
+            # Start dual detection with full screen
             start_detection_dual(self.csv_path, region)
             
         except ImportError:
@@ -471,9 +737,139 @@ class MainWindow:
         except Exception as e:
             messagebox.showerror("Lỗi", f"Không thể bắt đầu dual detection:\n{str(e)}")
 
+    def _show_screen_mode_selection(self):
+        """Hiển thị dialog chọn mode phân tích màn hình"""
+        import tkinter as tk
+        
+        result = {'mode': None}
+        
+        # Create dialog - Tăng chiều cao
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Chọn chế độ phân tích")
+        dialog.geometry("600x650")  # Tăng từ 500 lên 650
+        dialog.resizable(True, True)  # Cho phép resize
+        dialog.configure(bg="#ffffff")
+        
+        # Center dialog
+        dialog.update_idletasks()
+        x = (dialog.winfo_screenwidth() // 2) - 300
+        y = (dialog.winfo_screenheight() // 2) - 325  # Điều chỉnh y
+        dialog.geometry(f"600x650+{x}+{y}")
+        
+        # Make modal
+        dialog.transient(self.root)
+        dialog.grab_set()
+        
+        # Header
+        header_frame = tk.Frame(dialog, bg="#ffffff")
+        header_frame.pack(fill=tk.X, pady=(15, 10))
+        
+        tk.Label(header_frame, text="💻", font=("Segoe UI Emoji", 35),
+                bg="#ffffff").pack()
+        tk.Label(header_frame, text="Chọn chế độ quét màn hình",
+                font=("Segoe UI", 15, "bold"), bg="#ffffff", fg="#2c3e50").pack(pady=(8, 3))
+        tk.Label(header_frame, text="Bạn đang quét video call hay tự kiểm tra?",
+                font=("Segoe UI", 9), bg="#ffffff", fg="#7f8c8d").pack()
+        
+        # Scrollable content frame
+        canvas = tk.Canvas(dialog, bg="#ffffff", highlightthickness=0)
+        scrollbar = tk.Scrollbar(dialog, orient="vertical", command=canvas.yview)
+        content_frame = tk.Frame(canvas, bg="#ffffff")
+        
+        content_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=content_frame, anchor="nw", width=560)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.pack(side="left", fill="both", expand=True, padx=(20, 0), pady=(0, 10))
+        scrollbar.pack(side="right", fill="y", pady=(0, 10))
+        
+        # Enable mouse wheel scrolling
+        def _on_mousewheel(event):
+            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        
+        def select_mode(mode_value):
+            canvas.unbind_all("<MouseWheel>")
+            result['mode'] = mode_value
+            dialog.destroy()
+        
+        # Mode 1: Recruiter (Interview)
+        recruiter_card = tk.Frame(content_frame, bg="#f8f9fa",
+                                 highlightbackground="#8e44ad", highlightthickness=2)
+        recruiter_card.pack(fill=tk.X, pady=(0, 15))
+        
+        tk.Label(recruiter_card, text="👔 PHỎNG VẤN ONLINE",
+                font=("Segoe UI", 12, "bold"), bg="#f8f9fa", fg="#2c3e50").pack(
+                    anchor="w", padx=20, pady=(15, 5))
+        
+        tk.Label(recruiter_card, 
+                text="Quét ứng viên trong video call\n\n"
+                     "✅ Đánh giá cảm xúc real-time\n"
+                     "✅ Kiểm tra sự tự tin, tập trung\n"
+                     "✅ Phân tích hành vi, cử chỉ\n"
+                     "✅ Báo cáo chuyên nghiệp",
+                font=("Segoe UI", 9), bg="#f8f9fa", fg="#34495e",
+                justify=tk.LEFT).pack(anchor="w", padx=20, pady=(0, 10))
+        
+        recruiter_btn = tk.Button(recruiter_card, text="Chọn chế độ này",
+                                 font=("Segoe UI", 10, "bold"), bg="#8e44ad", fg="white",
+                                 relief=tk.FLAT, cursor="hand2",
+                                 command=lambda: select_mode('recruiter'))
+        recruiter_btn.pack(fill=tk.X, padx=20, pady=(0, 15), ipady=10)
+        
+        # Mode 2: Candidate (Practice)
+        candidate_card = tk.Frame(content_frame, bg="#f8f9fa",
+                                 highlightbackground="#16a085", highlightthickness=2)
+        candidate_card.pack(fill=tk.X, pady=(0, 15))
+        
+        tk.Label(candidate_card, text="🎓 TỰ LUYỆN TẬP",
+                font=("Segoe UI", 12, "bold"), bg="#f8f9fa", fg="#2c3e50").pack(
+                    anchor="w", padx=20, pady=(15, 5))
+        
+        tk.Label(candidate_card,
+                text="Tự kiểm tra trước khi phỏng vấn\n\n"
+                     "✅ Luyện tập biểu cảm, cử chỉ\n"
+                     "✅ Kiểm tra trang phục, ánh sáng\n"
+                     "✅ Đánh giá độ tự tin\n"
+                     "✅ Gợi ý cải thiện ngay",
+                font=("Segoe UI", 9), bg="#f8f9fa", fg="#34495e",
+                justify=tk.LEFT).pack(anchor="w", padx=20, pady=(0, 10))
+        
+        candidate_btn = tk.Button(candidate_card, text="Chọn chế độ này",
+                                 font=("Segoe UI", 10, "bold"), bg="#16a085", fg="white",
+                                 relief=tk.FLAT, cursor="hand2",
+                                 command=lambda: select_mode('candidate'))
+        candidate_btn.pack(fill=tk.X, padx=20, pady=(0, 15), ipady=10)
+        
+        # Cancel button
+        cancel_btn = tk.Button(content_frame, text="Hủy",
+                              font=("Segoe UI", 10), bg="#ffffff", fg="#e74c3c",
+                              relief=tk.FLAT, cursor="hand2",
+                              command=dialog.destroy)
+        cancel_btn.pack(pady=(10, 0), ipady=8)
+        
+        # Wait for dialog to close
+        dialog.wait_window()
+        
+        return result['mode']
+
     def logout(self):
         self.root.destroy()
         self.parent_root.deiconify()
+    
+    def exit_app(self):
+        """Thoát hoàn toàn khỏi ứng dụng"""
+        if messagebox.askyesno("Xác nhận thoát", 
+                              "Bạn có chắc muốn thoát khỏi ứng dụng?\n\n"
+                              "Tất cả cửa sổ sẽ được đóng."):
+            # Đóng tất cả cửa sổ và thoát
+            self.root.destroy()
+            self.parent_root.destroy()
+            sys.exit(0)
 
 
 def open_main_window(username, parent_root):
