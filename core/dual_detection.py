@@ -81,19 +81,34 @@ class DualAnalyzer:
     
     def start_screen_capture(self, capturer):
         """
-        Bắt đầu capture từ màn hình
+        Bắt đầu capture từ màn hình (Thread-safe)
         
         Args:
-            capturer: ScreenCapturer instance
+            capturer: ScreenCapturer instance (hoặc config để tạo mới)
         """
         def capture_loop():
-            while self.running:
-                frame = capturer.capture_frame()
-                if frame is not None:
-                    try:
-                        self.screen_queue.put(frame, block=False)
-                    except queue.Full:
-                        pass
+            # TẠO MỚI ScreenCapturer TRONG THREAD để tránh lỗi thread-local
+            from .screen_capture import ScreenCapturer
+            
+            # Lấy config từ capturer gốc
+            monitor_number = capturer.monitor_number if capturer else 1
+            roi = capturer.roi if capturer else None
+            
+            # Tạo capturer mới trong thread này
+            thread_capturer = ScreenCapturer(monitor_number)
+            if roi:
+                thread_capturer.set_roi(roi['left'], roi['top'], roi['width'], roi['height'])
+            
+            try:
+                while self.running:
+                    frame = thread_capturer.capture_frame()
+                    if frame is not None:
+                        try:
+                            self.screen_queue.put(frame, block=False)
+                        except queue.Full:
+                            pass
+            finally:
+                thread_capturer.close()
         
         self.screen_thread = threading.Thread(target=capture_loop, daemon=True)
         self.screen_thread.start()
@@ -113,12 +128,20 @@ class DualAnalyzer:
             return None
     
     def update_person1_emotion(self, emotion_idx):
-        """Cập nhật cảm xúc cho person 1 (camera)"""
+        """Cập nhật cảm xúc cho person 1 (camera) - deprecated, use update_person1_emotion_prob"""
         self.person1_results['emotion_counts'][emotion_idx] += 1
     
     def update_person2_emotion(self, emotion_idx):
-        """Cập nhật cảm xúc cho person 2 (screen)"""
+        """Cập nhật cảm xúc cho person 2 (screen) - deprecated, use update_person2_emotion_prob"""
         self.person2_results['emotion_counts'][emotion_idx] += 1
+    
+    def update_person1_emotion_prob(self, emotion_idx, probability):
+        """Cập nhật cảm xúc cho person 1 theo probability (nhất quán với start_detection)"""
+        self.person1_results['emotion_counts'][emotion_idx] += probability
+    
+    def update_person2_emotion_prob(self, emotion_idx, probability):
+        """Cập nhật cảm xúc cho person 2 theo probability (nhất quán với start_detection)"""
+        self.person2_results['emotion_counts'][emotion_idx] += probability
     
     def update_person1_attention(self, score):
         """Cập nhật attention cho person 1"""

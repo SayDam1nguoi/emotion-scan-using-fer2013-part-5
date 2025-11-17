@@ -14,6 +14,7 @@ from PIL import Image
 class ScreenCapturer:
     """
     Capture màn hình để phân tích video call
+    Thread-safe implementation
     """
     
     def __init__(self, monitor_number=1):
@@ -21,12 +22,21 @@ class ScreenCapturer:
         Args:
             monitor_number: số thứ tự màn hình (1 = primary, 2 = secondary, etc.)
         """
-        self.sct = mss.mss()
         self.monitor_number = monitor_number
-        self.monitor = self.sct.monitors[monitor_number]
+        self.sct = None  # Sẽ được khởi tạo khi cần (thread-safe)
+        self.monitor = None
         
         # Region of interest (có thể điều chỉnh)
         self.roi = None
+        
+        # Khởi tạo monitor info
+        self._init_monitor()
+    
+    def _init_monitor(self):
+        """Khởi tạo monitor info (thread-safe)"""
+        if self.sct is None:
+            self.sct = mss.mss()
+            self.monitor = self.sct.monitors[self.monitor_number]
         
     def list_monitors(self):
         """
@@ -35,6 +45,7 @@ class ScreenCapturer:
         Returns:
             list of monitor info
         """
+        self._init_monitor()  # Đảm bảo sct đã được khởi tạo
         monitors = []
         for i, monitor in enumerate(self.sct.monitors):
             if i == 0:  # Skip "all monitors" entry
@@ -70,17 +81,27 @@ class ScreenCapturer:
     
     def capture_frame(self):
         """
-        Capture 1 frame từ màn hình
+        Capture 1 frame từ màn hình (Thread-safe)
         
         Returns:
             numpy array (BGR format) hoặc None nếu lỗi
         """
         try:
+            # Đảm bảo sct đã được khởi tạo trong thread hiện tại
+            self._init_monitor()
+            
             # Chọn vùng capture
             region = self.roi if self.roi else self.monitor
             
-            # Capture
-            screenshot = self.sct.grab(region)
+            # Capture với error handling tốt hơn
+            try:
+                screenshot = self.sct.grab(region)
+            except AttributeError as e:
+                # Nếu gặp lỗi thread-local, tạo lại sct
+                print(f"Thread-local error, reinitializing: {e}")
+                self.sct = None
+                self._init_monitor()
+                screenshot = self.sct.grab(region)
             
             # Convert to numpy array
             img = np.array(screenshot)
@@ -91,6 +112,8 @@ class ScreenCapturer:
             return img
         except Exception as e:
             print(f"Lỗi capture: {e}")
+            import traceback
+            traceback.print_exc()
             return None
     
     def capture_video_stream(self, callback, fps=10):
@@ -131,7 +154,12 @@ class ScreenCapturer:
     
     def close(self):
         """Đóng screen capturer"""
-        self.sct.close()
+        if self.sct is not None:
+            try:
+                self.sct.close()
+            except:
+                pass
+            self.sct = None
 
 
 def select_capture_region_interactive():

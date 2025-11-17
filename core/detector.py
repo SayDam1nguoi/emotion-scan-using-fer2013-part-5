@@ -8,10 +8,11 @@ import sys
 import cv2
 import numpy as np
 import tensorflow as tf
-from mtcnn import MTCNN
 from tkinter import messagebox
 from sklearn.model_selection import train_test_split
 from tensorflow.keras.utils import to_categorical
+from datetime import datetime
+import time
 
 # Set UTF-8 encoding for console output
 if sys.platform == 'win32':
@@ -29,9 +30,54 @@ from .model import (build_mobilenet_model, train_model, save_model,
                    load_model, create_callbacks)
 from .affectiva_scoring import AffectivaScorer
 from .dress_analysis import analyze_dress_complete, get_dress_summary
+
+# Global pose dress detector (singleton)
+_pose_dress_detector = None
+
+def get_pose_dress_detector():
+    """Get or create pose dress detector (singleton)"""
+    global _pose_dress_detector
+    if _pose_dress_detector is None:
+        try:
+            from .dress_detector_pose import PoseDressDetector
+            _pose_dress_detector = PoseDressDetector()
+        except Exception as e:
+            print(f"Warning: Could not load pose dress detector: {e}")
+            _pose_dress_detector = False  # Mark as failed
+    return _pose_dress_detector if _pose_dress_detector is not False else None
+
+def analyze_dress_improved(face_box, frame, use_pose=True):
+    """
+    Improved dress analysis using pose detection
+    Falls back to color-based if pose fails
+    """
+    if use_pose:
+        detector = get_pose_dress_detector()
+        if detector:
+            try:
+                result = detector.detect_clothing(frame, face_box)
+                if result and result.get('confidence', 0) > 0.5:
+                    # Convert to compatible format
+                    return {
+                        'color_name': result['color_name'],
+                        'dress_type': result.get('coverage', 'unknown'),
+                        'combined_score': result['formality_score'],
+                        'score': result['formality_score'],
+                        'confidence': result['confidence'],
+                        'method': 'pose'
+                    }
+            except Exception as e:
+                print(f"Pose detection failed: {e}")
+    
+    # Fallback to original method
+    result = analyze_dress_complete(face_box, frame, use_yolo=True)
+    if result:
+        result['method'] = 'color'
+    return result
 from .background_analysis import analyze_background_cleanliness
 from utils.visualization import plot_emotion_chart
 from utils.suggestions import get_detailed_suggestions
+from utils.mode_suggestions import get_mode_specific_suggestions
 from utils.file_utils import save_results
 from ui.training_window import show_loading_window
 
@@ -119,13 +165,15 @@ def calculate_lighting_score(lighting_samples):
     return min(100, max(0, score))
 
 
-def start_detection(csv_path, video_path=None, camera_id=0):
+def start_detection(csv_path, video_path=None, camera_id=0, analysis_mode='candidate'):
     """
     Main detection function - quét cảm xúc từ camera hoặc video
     
     Args:
         csv_path: path to dataset CSV
         video_path: path to video file (None for camera)
+        camera_id: camera ID (default 0)
+        analysis_mode: 'recruiter' or 'candidate' (default 'candidate')
     """
     try:
         if not csv_path or not os.path.exists(csv_path):
@@ -218,26 +266,66 @@ def start_detection(csv_path, video_path=None, camera_id=0):
         
         # Start emotion detection
         cap = cv2.VideoCapture(camera_id if video_path is None else video_path)
-        # MTCNN detector (no min_face_size parameter available)
-        detector = MTCNN()
+        
+        # MediaPipe face detector (faster than MTCNN)
+        from core.face_detector_mediapipe import MediaPipeFaceDetector
+        from core.config import FACE_DETECTION_CONFIG, VIDEO_DETECTION_CONFIG
+        
+        # SỬ DỤNG CONFIG KHÁC NHAU CHO VIDEO VÀ CAMERA
+        if video_path is not None:
+            # VIDEO: Dễ dàng hơn để quét đầy đủ
+            detector = MediaPipeFaceDetector(
+                min_detection_confidence=VIDEO_DETECTION_CONFIG['min_detection_confidence'],
+                model_selection=FACE_DETECTION_CONFIG['model_selection'],
+                min_tracking_confidence=VIDEO_DETECTION_CONFIG['min_tracking_confidence']
+            )
+            # Cập nhật min_consecutive_frames cho video
+            detector.min_consecutive_frames = VIDEO_DETECTION_CONFIG['min_consecutive_frames']
+            detect_every_n_frames = VIDEO_DETECTION_CONFIG['detect_every_n_frames']
+            min_face_size_override = VIDEO_DETECTION_CONFIG['min_face_size']
+            face_threshold_override = VIDEO_DETECTION_CONFIG['face_threshold']
+            history_size = VIDEO_DETECTION_CONFIG['history_size']
+            edge_margin = VIDEO_DETECTION_CONFIG['edge_margin']
+        else:
+            # CAMERA: Nghiêm ngặt hơn
+            detector = MediaPipeFaceDetector(
+                min_detection_confidence=FACE_DETECTION_CONFIG['min_detection_confidence'],
+                model_selection=FACE_DETECTION_CONFIG['model_selection'],
+                min_tracking_confidence=FACE_DETECTION_CONFIG.get('min_tracking_confidence', 0.5)
+            )
+            detect_every_n_frames = DETECTION_CONFIG['detect_every_n_frames']
+            min_face_size_override = DETECTION_CONFIG['min_face_size']
+            face_threshold_override = 0.7
+            history_size = DETECTION_CONFIG['history_size']
+            edge_margin = 0.1
         
         # Close loading window
         loading_win.destroy()
         loading_root.destroy()
         emotion_counts = [0]*len(EMOTIONS)
         fps = cap.get(cv2.CAP_PROP_FPS) or 30
-        delay = int(1000/fps)
+        
+        # Video playback speed
+        video_speed = DETECTION_CONFIG.get('video_playback_speed', 1.0)
+        if video_path is not None:
+            delay = int(1000 / (fps * video_speed))
+        else:
+            delay = int(1000 / fps)
         
         # FPS optimization
         frame_count = 0
-        detect_every_n_frames = DETECTION_CONFIG['detect_every_n_frames']
         detection_scale = DETECTION_CONFIG['detection_scale']
         lighting_interval = DETECTION_CONFIG['lighting_check_interval']
         last_faces = []  # Cache faces từ lần detect trước
         
-        # Temporal smoothing
+        # Temporal smoothing (đã set ở trên dựa vào video/camera)
         emotion_history = []
-        history_size = DETECTION_CONFIG['history_size']
+        # history_size đã được set ở trên
+        
+        # LOẠI BỎ FALSE SCAN "NHẤP NHÁY" - Track thời gian xuất hiện
+        face_first_seen = None  # Thời điểm face xuất hiện lần đầu
+        face_stable = False     # Face đã ổn định chưa (xuất hiện đủ lâu)
+        min_stable_duration = VIDEO_DETECTION_CONFIG.get('min_stable_duration', 1.5) if video_path else 0.5
         
         # Lighting analysis
         lighting_samples = []
@@ -270,6 +358,11 @@ def start_detection(csv_path, video_path=None, camera_id=0):
         fps_frame_count = 0
         current_fps = 0
         
+        # Create window once (prevent multiple windows)
+        window_name = 'Emotion Detection'
+        cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+        cv2.resizeWindow(window_name, 1280, 720)
+        
         while True:
             ret, frame = cap.read()
             if not ret: 
@@ -286,6 +379,7 @@ def start_detection(csv_path, video_path=None, camera_id=0):
                 fps_frame_count = 0
             
             display_frame = frame.copy()
+            h_frame, w_frame = display_frame.shape[:2]  # Define early for use in attention tracking
             
             # Analyze lighting (mỗi N frames)
             if frame_count % lighting_interval == 0:
@@ -297,9 +391,13 @@ def start_detection(csv_path, video_path=None, camera_id=0):
                 cv2.putText(display_frame, f"Anh sang: {light_status} ({brightness:.0f})", (10, 60),
                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, light_color, 2)
             
-            # Display FPS
-            cv2.putText(display_frame, f"FPS: {current_fps:.1f}", (10, 90),
-                       cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 255, 0), 2)
+            # Display FPS và mode
+            mode_text = "VIDEO MODE (STRICT)" if video_path is not None else "CAMERA MODE"
+            fps_text = f"FPS: {current_fps:.1f} | {mode_text}"
+            if video_path is not None:
+                fps_text += f" | Conf: {face_threshold_override:.2f} | Min: {min_face_size_override}px"
+            cv2.putText(display_frame, fps_text, (10, 90),
+                       cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 0), 2)
             
             # Detect faces (chỉ mỗi N frames để tăng FPS)
             if frame_count % detect_every_n_frames == 0:
@@ -370,6 +468,10 @@ def start_detection(csv_path, video_path=None, camera_id=0):
             
             # Show face detection status
             if len(faces) == 0:
+                # RESET face tracking khi không có face
+                face_first_seen = None
+                face_stable = False
+                
                 cv2.putText(display_frame, "No face detected", (10, 30),
                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
             else:
@@ -381,11 +483,44 @@ def start_detection(csv_path, video_path=None, camera_id=0):
                 confidence_face = f['confidence']
                 
                 # Draw all detected faces with different colors
-                if confidence_face < CONFIDENCE_THRESHOLDS['face_detection']:
-                    # Low confidence face - draw in yellow
-                    cv2.rectangle(display_frame, (x,y), (x+w,y+h), (0,255,255), 1)
-                    cv2.putText(display_frame, f"Low conf: {confidence_face:.2f}", (x, y-10),
-                               cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,255), 1)
+                # SỬ DỤNG THRESHOLD KHÁC NHAU CHO VIDEO VÀ CAMERA
+                # face_threshold_override đã được set ở trên
+                
+                if confidence_face < face_threshold_override:
+                    # Low confidence face - KHÔNG XỬ LÝ (bỏ qua false positives)
+                    cv2.rectangle(display_frame, (x,y), (x+w,y+h), (128,128,128), 1)
+                    cv2.putText(display_frame, f"Low: {confidence_face:.2f}", (x, y-10),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.4, (128,128,128), 1)
+                    continue
+                
+                # FACE QUALITY CHECK - loại bỏ false positives
+                # 1. Kiểm tra aspect ratio
+                aspect_ratio = w / h if h > 0 else 0
+                if aspect_ratio < 0.7 or aspect_ratio > 1.5:
+                    cv2.putText(display_frame, "Bad ratio", (x, y-10),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0,0,255), 1)
+                    continue  # Face không đúng tỷ lệ
+                
+                # 2. Kiểm tra kích thước tối thiểu (sử dụng override cho video)
+                if w < min_face_size_override or h < min_face_size_override:
+                    cv2.putText(display_frame, "Too small", (x, y-10),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0,0,255), 1)
+                    continue  # Face quá nhỏ
+                
+                # 3. Kiểm tra vị trí (face phải ở trung tâm, không ở rìa)
+                # Sử dụng edge_margin khác nhau cho video/camera
+                frame_h, frame_w = frame.shape[:2]
+                center_x = x + w // 2
+                center_y = y + h // 2
+                # Bỏ qua faces ở rìa frame (có thể là false positives)
+                # Video: edge_margin = 0.05 (dễ dàng hơn), Camera: 0.1 (nghiêm ngặt hơn)
+                if center_x < frame_w * edge_margin or center_x > frame_w * (1 - edge_margin):
+                    cv2.putText(display_frame, "Edge face", (x, y-10),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0,0,255), 1)
+                    continue
+                if center_y < frame_h * (edge_margin / 2) or center_y > frame_h * (1 - edge_margin / 2):
+                    cv2.putText(display_frame, "Edge face", (x, y-10),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.4, (0,0,255), 1)
                     continue
                 
                 # Expand face ROI
@@ -397,10 +532,10 @@ def start_detection(csv_path, video_path=None, camera_id=0):
                 if x2 <= x1 or y2 <= y1:
                     continue
                 
-                # Analyze dress (color + type) moi 30 frames
+                # Analyze dress (color + type) moi 30 frames - IMPROVED with pose
                 if frame_count % 30 == 0:
-                    dress_result = analyze_dress_complete((x, y, w, h), frame, use_yolo=True)
-                    if dress_result.get('combined_score', 0) > 0:
+                    dress_result = analyze_dress_improved((x, y, w, h), frame, use_pose=True)
+                    if dress_result and dress_result.get('combined_score', 0) > 0:
                         dress_color_samples.append(dress_result)
                 
                 # Preprocess face
@@ -431,10 +566,24 @@ def start_detection(csv_path, video_path=None, camera_id=0):
                 # Apply calibration again on averaged predictions
                 avg_pred = calibrate_predictions(avg_pred)
                 
-                # THAY ĐỔI: Tính tổng hợp TẤT CẢ emotions theo probability
-                # Không dùng confidence threshold nữa
-                for i in range(len(EMOTIONS)):
-                    emotion_counts[i] += avg_pred[i]  # Cộng probability thay vì count
+                # KIỂM TRA THỜI GIAN XUẤT HIỆN - Loại bỏ "nhấp nháy"
+                current_time = time.time()
+                
+                if face_first_seen is None:
+                    # Face mới xuất hiện
+                    face_first_seen = current_time
+                    face_stable = False
+                else:
+                    # Kiểm tra face đã xuất hiện đủ lâu chưa
+                    duration = current_time - face_first_seen
+                    if duration >= min_stable_duration:
+                        face_stable = True
+                
+                # CHỈ TÍNH CẢM XÚC NẾU FACE ĐÃ ỔN ĐỊNH (xuất hiện đủ lâu)
+                if face_stable:
+                    # THAY ĐỔI: Tính tổng hợp TẤT CẢ emotions theo probability
+                    for i in range(len(EMOTIONS)):
+                        emotion_counts[i] += avg_pred[i]  # Cộng probability thay vì count
                 
                 # Lấy emotion có probability cao nhất để hiển thị
                 pred_idx = np.argmax(avg_pred)
@@ -448,19 +597,28 @@ def start_detection(csv_path, video_path=None, camera_id=0):
                 emotion_status = get_emotion_status(emo, avg_pred[pred_idx])
                 
                 # Display with different colors
-                if is_valid:
-                    # Valid prediction
-                    color = (0,0,255) if emo in NEGATIVE_EMOTIONS else (0,255,0)
-                    thickness = 3
+                if face_stable:
+                    # Face đã ổn định - hiển thị cảm xúc
+                    if is_valid:
+                        color = (0,0,255) if emo in NEGATIVE_EMOTIONS else (0,255,0)
+                        thickness = 3
+                    else:
+                        color = (0,165,255)
+                        thickness = 2
+                    
+                    cv2.rectangle(display_frame,(x,y),(x+w,y+h),color,thickness)
                 else:
-                    # Low confidence
-                    color = (0,165,255)
-                    thickness = 2
-                
-                cv2.rectangle(display_frame,(x,y),(x+w,y+h),color,thickness)
+                    # Face chưa ổn định - đang chờ
+                    duration = current_time - face_first_seen if face_first_seen else 0
+                    remaining = min_stable_duration - duration
+                    
+                    # Hiển thị màu vàng và thông báo "đang chờ"
+                    cv2.rectangle(display_frame,(x,y),(x+w,y+h),(0,255,255),2)
+                    cv2.putText(display_frame, f"Dang cho on dinh... {remaining:.1f}s", (x, y-10),
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,255), 2)
                 
                 # Display emotion status (Vietnamese description) - CHI hien thi text
-                if is_valid:
+                if is_valid and face_stable:
                     status_y = y + h + 30
                     cv2.putText(display_frame, emotion_status, (x, status_y),
                                cv2.FONT_HERSHEY_SIMPLEX, 0.8, color, 2)
@@ -493,21 +651,99 @@ def start_detection(csv_path, video_path=None, camera_id=0):
             prev_gray = curr_gray.copy()
             
             # Add instructions at bottom
-            h_frame, w_frame = display_frame.shape[:2]
-            cv2.putText(display_frame, "Press 'q' to quit | Green=Valid | Orange=Low confidence | Yellow=Face too far",
+            instructions = "Press 'q' to quit | 'n' to add note (recruiter)"
+            if analysis_mode == 'recruiter':
+                instructions += " | Green=Valid | Yellow=Waiting"
+            cv2.putText(display_frame, instructions,
                        (10, h_frame - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255,255,255), 1)
             
-            cv2.imshow('Emotion Detection', display_frame)
-            if cv2.waitKey(delay) & 0xFF == ord('q'): 
+            cv2.imshow(window_name, display_frame)
+            key = cv2.waitKey(delay) & 0xFF
+            
+            if key == ord('q'):
                 break
+            elif key == ord('n') and analysis_mode == 'recruiter':
+                # Mở cửa sổ ghi nhận xét (chỉ cho recruiter)
+                if 'notes_manager' not in locals():
+                    from .recruiter_notes import RecruiterNotes, create_notes_window
+                    candidate_name = "Candidate_" + datetime.now().strftime('%Y%m%d_%H%M%S')
+                    notes_manager = RecruiterNotes(candidate_name, 'video' if video_path else 'camera')
+                    notes_window = create_notes_window(notes_manager)
+                else:
+                    # Đưa cửa sổ lên trên
+                    try:
+                        notes_window.lift()
+                        notes_window.focus_force()
+                    except:
+                        # Cửa sổ đã đóng, tạo lại
+                        notes_window = create_notes_window(notes_manager)
 
         cap.release()
         cv2.destroyAllWindows()
+        
+        # Lưu nhận xét của recruiter (nếu có)
+        if 'notes_manager' in locals() and len(notes_manager.get_all_notes()) > 0:
+            notes_file = notes_manager.save_to_file()
+            print(f"\n✅ Đã lưu {len(notes_manager.get_all_notes())} nhận xét vào: {notes_file}")
+            
+            # Hiển thị tóm tắt
+            summary = notes_manager.generate_summary()
+            print("\n" + summary)
 
         # Show results
         if sum(emotion_counts)==0:
-            messagebox.showwarning("Ket qua","Khong phat hien khuan mat hop le trong video.\n\nVui long:\n- Dam bao khuan mat ro rang\n- Anh sang du\n- Camera on dinh")
-            return
+            # Nếu là mode recruiter đánh giá ứng viên
+            if analysis_mode == 'recruiter':
+                # Kiểm tra xem có phải do ánh sáng không
+                lighting_issue = False
+                if lighting_samples:
+                    avg_brightness = np.mean(lighting_samples)
+                    # Ánh sáng quá thấp (< 70) hoặc quá cao (> 190)
+                    if avg_brightness < 70 or avg_brightness > 190:
+                        lighting_issue = True
+                
+                if lighting_issue:
+                    # Nếu do ánh sáng, cho phép bỏ qua
+                    msg = ("⚠️ Không phát hiện khuôn mặt trong video\n\n"
+                           "Nguyên nhân: Ánh sáng quá thấp/cao\n"
+                           f"Độ sáng trung bình: {avg_brightness:.0f}/255\n\n"
+                           "Đây có thể là vấn đề kỹ thuật, không phải lỗi của ứng viên.\n\n"
+                           "Bạn có muốn:\n"
+                           "- BỎ QUA video này (khuyến nghị)\n"
+                           "- Xem báo cáo kỹ thuật chi tiết")
+                    result = messagebox.askyesnocancel(
+                        "Vấn đề ánh sáng", 
+                        msg,
+                        icon='warning'
+                    )
+                    if result is None:  # Cancel = Bỏ qua
+                        messagebox.showinfo("Đã bỏ qua", 
+                                          "Video này đã được bỏ qua do vấn đề ánh sáng.\n\n"
+                                          "Khuyến nghị: Yêu cầu ứng viên gửi lại video với ánh sáng tốt hơn.")
+                        return
+                    elif not result:  # No = Không xem báo cáo
+                        return
+                    # Yes = Tiếp tục xem báo cáo kỹ thuật
+                else:
+                    # Không phải do ánh sáng - có thể là vấn đề khác
+                    msg = ("CẢNH BÁO: Không phát hiện khuôn mặt trong video!\n\n"
+                           "Có thể do:\n"
+                           "- Khuôn mặt không rõ ràng\n"
+                           "- Video chất lượng kém\n"
+                           "- Camera không ổn định\n\n"
+                           "⚠️ ĐÂY CÓ THỂ LÀ DẤU HIỆU TIÊU CỰC:\n"
+                           "Ứng viên có thể:\n"
+                           "- Không chuẩn bị kỹ\n"
+                           "- Thiếu chuyên nghiệp\n"
+                           "- Video không đạt yêu cầu\n\n"
+                           "Bạn có muốn xem báo cáo kỹ thuật không?")
+                    result = messagebox.askyesno("Không phát hiện khuôn mặt", msg)
+                    if not result:
+                        return
+                    # Tiếp tục với emotion_counts = 0 để tạo báo cáo kỹ thuật
+            else:
+                messagebox.showwarning("Ket qua","Khong phat hien khuan mat hop le trong video.\n\nVui long:\n- Dam bao khuan mat ro rang\n- Anh sang du\n- Camera on dinh")
+                return
         
         # Normalize emotion_counts (giờ là tổng probabilities)
         # Chuyển về percentages
@@ -577,6 +813,14 @@ def start_detection(csv_path, video_path=None, camera_id=0):
             gesture_score=gesture_summary['gesture_score']
         )
         
+        # Create behavior summary for mode suggestions
+        behavior_summary = {
+            'posture': posture_summary,
+            'eye_contact': eye_contact_summary,
+            'gestures': gesture_summary,
+            'fidgeting': fidgeting_result
+        }
+        
         # 4. Technical score
         technical_score = scorer.calculate_technical_score()
         
@@ -607,9 +851,18 @@ def start_detection(csv_path, video_path=None, camera_id=0):
             attention_summary = attention_tracker.get_attention_summary()
             attention_report = f"\n\n{'='*60}\n\n{format_attention_report(attention_summary)}"
         
+        # Mode-specific suggestions (Recruiter vs Candidate)
+        mode_specific_report = get_mode_specific_suggestions(
+            analysis_mode,
+            emotion_counts,
+            lighting_samples,
+            dress_color_samples,
+            behavior_summary
+        )
+        
         # Combine all reports for chart
         mode_title = "PHỎNG VẤN ONLINE" if detection_mode == 'live' else "VIDEO CV"
-        full_report = f"{affectiva_report}\n\n{'='*60}\n\n{mode_title}:\n{mode_suggestions}{attention_report}"
+        full_report = f"{affectiva_report}\n\n{'='*60}\n\n{mode_title}:\n{mode_suggestions}{attention_report}{mode_specific_report}"
         
         # Save results
         save_results(emotion_counts, final_emo)
@@ -635,13 +888,14 @@ def start_detection(csv_path, video_path=None, camera_id=0):
 
 
 
-def start_detection_screen(csv_path, capture_region):
+def start_detection_screen(csv_path, capture_region, analysis_mode='recruiter'):
     """
     Detection function cho screen capture (video call)
     
     Args:
         csv_path: path to dataset CSV
         capture_region: (x, y, width, height) vùng capture
+        analysis_mode: 'recruiter' or 'candidate' (default 'recruiter')
     """
     try:
         if not csv_path or not os.path.exists(csv_path):
@@ -717,8 +971,14 @@ def start_detection_screen(csv_path, capture_region):
                           "- Nhấn 's' để chụp ảnh\n"
                           "- Đảm bảo khuôn mặt người đối diện rõ ràng")
 
-        # Initialize MTCNN
-        detector = MTCNN()
+        # Initialize MediaPipe face detector
+        from core.face_detector_mediapipe import MediaPipeFaceDetector
+        from core.config import FACE_DETECTION_CONFIG
+        detector = MediaPipeFaceDetector(
+            min_detection_confidence=FACE_DETECTION_CONFIG['min_detection_confidence'],
+            model_selection=FACE_DETECTION_CONFIG['model_selection'],
+            min_tracking_confidence=FACE_DETECTION_CONFIG.get('min_tracking_confidence', 0.5)
+        )
         
         # Tracking variables
         emotion_counts = [0] * len(EMOTIONS)
@@ -756,8 +1016,28 @@ def start_detection_screen(csv_path, capture_region):
         
         frame_count = 0
         
+        # Create window once (prevent multiple windows)
+        window_name = "Screen Capture - Video Call Analysis"
+        cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+        cv2.resizeWindow(window_name, 1280, 720)
+        
+        # FPS limiter (target 30 FPS for smooth video)
+        target_fps = 30
+        frame_delay = 1.0 / target_fps
+        last_frame_time = time.time()
+        
+        # Cache for face detection optimization
+        last_faces = []
+        
         # Main loop
         while True:
+            # FPS limiting - maintain consistent frame rate
+            current_time = time.time()
+            elapsed = current_time - last_frame_time
+            if elapsed < frame_delay:
+                time.sleep(frame_delay - elapsed)
+            last_frame_time = time.time()
+            
             # Capture frame from screen
             frame = capturer.capture_frame()
             if frame is None:
@@ -783,9 +1063,13 @@ def start_detection_screen(csv_path, capture_region):
                 brightness, status, color = lighting_result
                 lighting_samples.append(brightness)
             
-            # Detect faces
-            rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-            faces = detector.detect_faces(rgb)
+            # Detect faces (optimize: detect every 3 frames for better FPS)
+            if frame_count % 3 == 0:
+                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                faces = detector.detect_faces(rgb)
+                last_faces = faces  # Cache for next frames
+            else:
+                faces = last_faces  # Use cached faces
             
             # Background analysis
             if frame_count % 30 == 0:
@@ -818,10 +1102,10 @@ def start_detection_screen(csv_path, capture_region):
                 if x2 <= x1 or y2 <= y1:
                     continue
                 
-                # Analyze dress every 30 frames
+                # Analyze dress every 30 frames - IMPROVED with pose
                 if frame_count % 30 == 0:
-                    dress_result = analyze_dress_complete((x, y, w, h), frame, use_yolo=True)
-                    if dress_result.get('combined_score', 0) > 0:
+                    dress_result = analyze_dress_improved((x, y, w, h), frame, use_pose=True)
+                    if dress_result and dress_result.get('combined_score', 0) > 0:
                         dress_color_samples.append(dress_result)
                 
                 # Preprocess face
@@ -852,10 +1136,14 @@ def start_detection_screen(csv_path, capture_region):
                 # Apply confidence filter
                 is_valid, _ = apply_confidence_filter(smoothed_pred, emotion_idx)
                 
+                # Cộng probability cho tất cả emotions (nhất quán với start_detection)
+                for i in range(len(EMOTIONS)):
+                    emotion_counts[i] += smoothed_pred[i]
+                
+                # Lấy emotion dominant để hiển thị
+                emotion = EMOTIONS[emotion_idx]
+                
                 if is_valid:
-                    emotion = EMOTIONS[emotion_idx]
-                    emotion_counts[emotion_idx] += 1
-                    
                     # Color based on emotion
                     if emotion in NEGATIVE_EMOTIONS:
                         color = (0, 0, 255)
@@ -901,8 +1189,8 @@ def start_detection_screen(csv_path, capture_region):
             cv2.putText(display_frame, f"FPS: {current_fps:.1f}", (10, h_frame - 20),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
             
-            # Show
-            cv2.imshow("Screen Capture - Video Call Analysis", display_frame)
+            # Show (use existing window)
+            cv2.imshow(window_name, display_frame)
             
             key = cv2.waitKey(1) & 0xFF
             if key == ord('q'):
@@ -1084,8 +1372,14 @@ def start_detection_dual(csv_path, capture_region):
         screen_capturer = ScreenCapturer()
         screen_capturer.set_roi(*capture_region)
         
-        # Initialize MTCNN
-        detector = MTCNN()
+        # Initialize MediaPipe face detector
+        from core.face_detector_mediapipe import MediaPipeFaceDetector
+        from core.config import FACE_DETECTION_CONFIG
+        detector = MediaPipeFaceDetector(
+            min_detection_confidence=FACE_DETECTION_CONFIG['min_detection_confidence'],
+            model_selection=FACE_DETECTION_CONFIG['model_selection'],
+            min_tracking_confidence=FACE_DETECTION_CONFIG.get('min_tracking_confidence', 0.5)
+        )
         
         # Start capture threads
         dual_analyzer.start()
@@ -1119,8 +1413,25 @@ def start_detection_dual(csv_path, capture_region):
         
         frame_count = 0
         
+        # Create window once (prevent multiple windows)
+        window_name = "DUAL ANALYSIS - Quet ca 2 nguoi"
+        cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+        cv2.resizeWindow(window_name, 1280, 720)
+        
+        # FPS limiter (target 30 FPS for smooth video)
+        target_fps = 30
+        frame_delay = 1.0 / target_fps
+        last_frame_time = time.time()
+        
         # Main loop
         while True:
+            # FPS limiting - maintain consistent frame rate
+            current_time = time.time()
+            elapsed = current_time - last_frame_time
+            if elapsed < frame_delay:
+                time.sleep(frame_delay - elapsed)
+            last_frame_time = time.time()
+            
             frame_count += 1
             fps_frame_count += 1
             
@@ -1185,11 +1496,14 @@ def start_detection_dual(csv_path, capture_region):
                         emotion_idx = np.argmax(smoothed_pred)
                         confidence = smoothed_pred[emotion_idx]
                         
+                        # CẬP NHẬT THEO PROBABILITY (nhất quán với start_detection)
+                        for i in range(len(EMOTIONS)):
+                            dual_analyzer.update_person1_emotion_prob(i, smoothed_pred[i])
+                        
                         is_valid, _ = apply_confidence_filter(smoothed_pred, emotion_idx)
                         
                         if is_valid:
                             emotion = EMOTIONS[emotion_idx]
-                            dual_analyzer.update_person1_emotion(emotion_idx)
                             
                             # Draw on camera part
                             color = (0, 0, 255) if emotion in NEGATIVE_EMOTIONS else (0, 255, 0) if emotion == 'Happy' else (255, 0, 0)
@@ -1240,11 +1554,14 @@ def start_detection_dual(csv_path, capture_region):
                         emotion_idx = np.argmax(smoothed_pred)
                         confidence = smoothed_pred[emotion_idx]
                         
+                        # CẬP NHẬT THEO PROBABILITY (nhất quán với start_detection)
+                        for i in range(len(EMOTIONS)):
+                            dual_analyzer.update_person2_emotion_prob(i, smoothed_pred[i])
+                        
                         is_valid, _ = apply_confidence_filter(smoothed_pred, emotion_idx)
                         
                         if is_valid:
                             emotion = EMOTIONS[emotion_idx]
-                            dual_analyzer.update_person2_emotion(emotion_idx)
                             
                             # Draw on screen part (offset by camera width)
                             offset_x = camera_resized.shape[1]
@@ -1269,8 +1586,8 @@ def start_detection_dual(csv_path, capture_region):
                 cv2.putText(display_frame, f"FPS: {current_fps:.1f} | Nhan 'q' de dung", (10, display_frame.shape[0] - 20),
                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
                 
-                # Show
-                cv2.imshow("DUAL ANALYSIS - Quet ca 2 nguoi", display_frame)
+                # Show (use existing window)
+                cv2.imshow(window_name, display_frame)
             
             key = cv2.waitKey(1) & 0xFF
             if key == ord('q'):
@@ -1435,8 +1752,13 @@ def start_detection_camera_roi(csv_path, roi, camera_id=0):
                           "- Nhấn 's' để chụp ảnh\n"
                           "- Vùng màu xanh là vùng đang quét")
         
-        # Initialize MTCNN
-        detector = MTCNN()
+        # Initialize MediaPipe face detector
+        from core.face_detector_mediapipe import MediaPipeFaceDetector
+        from core.config import FACE_DETECTION_CONFIG
+        detector = MediaPipeFaceDetector(
+            min_detection_confidence=FACE_DETECTION_CONFIG['min_detection_confidence'],
+            model_selection=FACE_DETECTION_CONFIG['model_selection']
+        )
         
         # Tracking variables (same as normal detection)
         detection_mode = 'live'
@@ -1467,6 +1789,11 @@ def start_detection_camera_roi(csv_path, roi, camera_id=0):
         current_fps = 0
         
         frame_count = 0
+        
+        # Create window once (prevent multiple windows)
+        window_name = "Camera ROI Detection"
+        cv2.namedWindow(window_name, cv2.WINDOW_NORMAL)
+        cv2.resizeWindow(window_name, 1280, 720)
         
         # Main loop
         while True:
@@ -1540,10 +1867,10 @@ def start_detection_camera_roi(csv_path, roi, camera_id=0):
                 if x2 <= x1 or y2 <= y1:
                     continue
                 
-                # Analyze dress
+                # Analyze dress - IMPROVED with pose
                 if frame_count % 30 == 0:
-                    dress_result = analyze_dress_complete((x, y, w, h), roi_frame, use_yolo=True)
-                    if dress_result.get('combined_score', 0) > 0:
+                    dress_result = analyze_dress_improved((x, y, w, h), roi_frame, use_pose=True)
+                    if dress_result and dress_result.get('combined_score', 0) > 0:
                         dress_color_samples.append(dress_result)
                 
                 # Preprocess face
@@ -1570,10 +1897,14 @@ def start_detection_camera_roi(csv_path, roi, camera_id=0):
                 
                 is_valid, _ = apply_confidence_filter(smoothed_pred, emotion_idx)
                 
+                # Cộng probability cho tất cả emotions (nhất quán với start_detection)
+                for i in range(len(EMOTIONS)):
+                    emotion_counts[i] += smoothed_pred[i]
+                
+                # Lấy emotion dominant để hiển thị
+                emotion = EMOTIONS[emotion_idx]
+                
                 if is_valid:
-                    emotion = EMOTIONS[emotion_idx]
-                    emotion_counts[emotion_idx] += 1
-                    
                     color = (0, 0, 255) if emotion in NEGATIVE_EMOTIONS else (0, 255, 0) if emotion == 'Happy' else (255, 0, 0)
                     
                     # Draw on full frame
@@ -1611,8 +1942,8 @@ def start_detection_camera_roi(csv_path, roi, camera_id=0):
             cv2.putText(display_frame, f"FPS: {current_fps:.1f}", (10, h_frame - 20),
                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
             
-            # Show
-            cv2.imshow("Camera ROI Detection", display_frame)
+            # Show (use existing window)
+            cv2.imshow(window_name, display_frame)
             
             key = cv2.waitKey(1) & 0xFF
             if key == ord('q'):
