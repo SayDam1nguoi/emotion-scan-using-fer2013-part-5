@@ -9,3 +9,5 @@
 - Quét tỷ lệ tập trung -> tránh việc khi đang trò chuyện thì mắt người kia không tập trung vào màn hình đối phương (beta)
 # Các thư viện cần cài
 pip install tensorflow opencv-python mtcnn numpy scikit-learn matplotlib Pillow mss
+# Database cần phải có
+fer2013.csv
