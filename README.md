@@ -11,3 +11,4 @@
 pip install tensorflow opencv-python mtcnn numpy scikit-learn matplotlib Pillow mss
 # Database cần phải có
 fer2013.csv
+Nếu có bug hay có cách sửa gì thì có thể liên hệ qua email :duythai6777@gmail.com
